@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Black Friday Sales Forecasting Dashboard</title>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- PapaParse via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- simple-statistics via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.3/dist/simple-statistics.min.js"></script>
+
+  <style>
+    /* Nederlands commentaar: Extra kleine stijlregels naast Tailwind, o.a. voor focus-ring en kaartschaduw */
+    :root { color-scheme: light; }
+    .card { box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+    .soft-border { border: 1px solid rgba(148,163,184,.45); }
+    .muted { color: rgb(71 85 105); }
+  </style>
+</head>
+
+<body class="bg-slate-50 text-slate-900">
+  <div class="min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-slate-200 bg-white">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="h-10 w-10 rounded-2xl bg-blue-600 text-white grid place-items-center font-semibold">BF</div>
+          <div>
+            <h1 class="text-xl font-semibold leading-tight">Black Friday Sales Forecasting</h1>
+            <p class="text-sm muted">Interactive dashboard for classroom predictive analysis</p>
+          </div>
+        </div>
+        <div class="text-sm text-slate-500">
+          <span class="hidden sm:inline">Upload CSVs → Fit linear model → Explore temperature scenarios</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Main area -->
+        <section class="lg:col-span-8">
+          <!-- Upload + controls -->
+          <div class="bg-white rounded-2xl card soft-border p-5">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 class="text-lg font-semibold">1) Upload your data</h2>
+                <p class="text-sm muted">Required CSVs: <span class="font-medium">sales.csv</span> (date, revenue) and <span class="font-medium">weather.csv</span> (date, temperature, precipitation)</p>
+              </div>
+              <button id="btnLoadDemo" class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition">
+                Load demo data
+              </button>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <!-- Sales upload -->
+              <div class="rounded-2xl soft-border p-4 bg-slate-50">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="font-semibold">Sales CSV</div>
+                    <div class="text-xs muted">Columns: date, revenue</div>
+                  </div>
+                  <span id="salesStatus" class="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">Not loaded</span>
+                </div>
+                <div class="mt-3">
+                  <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input id="salesFile" type="file" accept=".csv,text/csv" class="hidden" />
+                    <span class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 transition">Upload sales.csv</span>
+                    <span id="salesFilename" class="text-sm muted truncate max-w-[14rem]"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Weather upload -->
+              <div class="rounded-2xl soft-border p-4 bg-slate-50">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="font-semibold">Weather CSV</div>
+                    <div class="text-xs muted">Columns: date, temperature, precipitation</div>
+                  </div>
+                  <span id="weatherStatus" class="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">Not loaded</span>
+                </div>
+                <div class="mt-3">
+                  <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input id="weatherFile" type="file" accept=".csv,text/csv" class="hidden" />
+                    <span class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 transition">Upload weather.csv</span>
+                    <span id="weatherFilename" class="text-sm muted truncate max-w-[14rem]"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+              <div class="text-sm muted">
+                <span class="font-medium">Auto-detection:</span> delimiter is detected as <span id="delimiterInfo" class="font-semibold text-slate-800">—</span>
+                <span class="hidden sm:inline"> • Data is merged on <span class="font-semibold">date</span>.</span>
+              </div>
+
+              <button id="btnRun" disabled class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold bg-blue-600 text-white disabled:bg-slate-300 disabled:text-slate-600 hover:bg-blue-500 transition">
+                Run forecast
+              </button>
+            </div>
+
+            <div id="uploadError" class="hidden mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"></div>
+          </div>
+
+          <!-- Results -->
+          <div class="mt-6 bg-white rounded-2xl card soft-border p-5">
+            <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+              <div>
+                <h2 class="text-lg font-semibold">2) Forecast results</h2>
+                <p class="text-sm muted">Revenue is predicted from temperature using simple linear regression.</p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div class="rounded-2xl soft-border bg-slate-50 p-3">
+                  <div class="text-xs muted">Avg. temperature (Black Friday history)</div>
+                  <div id="avgTemp" class="text-lg font-semibold">—</div>
+                </div>
+                <div class="rounded-2xl soft-border bg-slate-50 p-3">
+                  <div class="text-xs muted">Model (revenue = a + b·temp)</div>
+                  <div id="modelEq" class="text-sm font-semibold">—</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="rounded-2xl soft-border bg-slate-50 p-4">
+                <div class="text-xs muted">Predicted Black Friday revenue</div>
+                <div id="predRevenue" class="text-2xl font-semibold text-blue-700">—</div>
+                <div class="text-xs muted mt-1">Date used: <span id="bfDateUsed" class="font-semibold text-slate-800">—</span></div>
+              </div>
+
+              <div class="md:col-span-2 rounded-2xl soft-border bg-slate-50 p-4">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-sm font-semibold">Temperature Scenario</div>
+                    <div class="text-xs muted">Adjust deviation from average (−5°C to +5°C).</div>
+                  </div>
+                  <div class="text-sm font-semibold text-slate-800">
+                    <span id="scenarioLabel">0</span>°C
+                  </div>
+                </div>
+
+                <div class="mt-3 flex items-center gap-3">
+                  <span class="text-xs muted w-10 text-right">-5°C</span>
+                  <input id="tempSlider" type="range" min="-5" max="5" step="0.5" value="0" class="w-full" disabled />
+                  <span class="text-xs muted w-10">+5°C</span>
+                </div>
+
+                <div class="mt-2 text-xs muted">
+                  Scenario temperature: <span id="scenarioTemp" class="font-semibold text-slate-800">—</span>
+                  <span class="mx-2">•</span>
+                  Predicted revenue: <span id="scenarioRevenue" class="font-semibold text-slate-800">—</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-6">
+              <div class="flex items-center justify-between">
+                <h3 class="font-semibold">Historical revenue + predicted Black Friday</h3>
+                <div class="text-xs muted">Tip: use demo data if you don't have CSVs ready.</div>
+              </div>
+              <div class="mt-3 rounded-2xl soft-border bg-white p-3">
+                <canvas id="chart" height="140"></canvas>
+              </div>
+
+              <div id="dataSummary" class="mt-4 text-sm muted"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Sidebar -->
+        <aside class="lg:col-span-4">
+          <div class="bg-white rounded-2xl card soft-border p-5 sticky top-6">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-semibold">What is Predictive Analysis?</h2>
+                <p class="text-sm muted">A business-friendly explanation</p>
+              </div>
+              <button id="toggleSidebar" class="text-xs font-semibold text-blue-700 hover:text-blue-600">Collapse</button>
+            </div>
+
+            <div id="sidebarBody" class="mt-4 space-y-3">
+              <p class="text-sm muted">
+                Predictive analysis uses historical data to estimate what is likely to happen next. In business,
+                it helps you plan inventory, staffing, marketing budgets, and revenue targets.
+              </p>
+              <div class="rounded-2xl soft-border bg-slate-50 p-4">
+                <div class="font-semibold text-sm">In this dashboard</div>
+                <ul class="mt-2 text-sm muted list-disc pl-5 space-y-1">
+                  <li>We merge <span class="font-medium">sales</span> and <span class="font-medium">weather</span> by date.</li>
+                  <li>We fit a <span class="font-medium">linear regression</span> model: revenue depends on temperature.</li>
+                  <li>We forecast Black Friday revenue and test “what-if” temperature scenarios.</li>
+                </ul>
+              </div>
+              <div class="rounded-2xl soft-border bg-slate-50 p-4">
+                <div class="font-semibold text-sm">Why scenarios?</div>
+                <p class="mt-1 text-sm muted">
+                  Real life is uncertain. Scenarios help you explore how outcomes might change if conditions change.
+                  Here: if Black Friday is warmer or colder than average.
+                </p>
+              </div>
+
+              <div class="text-xs muted">
+                Note: This is a simplified educational model. In practice you would include more drivers (marketing, promotions,
+                web traffic, competitor pricing) and validate accuracy more rigorously.
+              </div>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 text-xs text-slate-500">
+        Single-file classroom dashboard • Tailwind + Chart.js + PapaParse + simple-statistics
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    // =============================
+    // Nederlands commentaar: Globale state en helpers
+    // =============================
+
+    const state = {
+      salesRows: null,
+      weatherRows: null,
+      mergedRows: null,
+      delimiterSales: null,
+      delimiterWeather: null,
+      model: null,           // { a, b }
+      avgTempBF: null,
+      bfDate: null,
+      chart: null,
+      predictedBFRevenue: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function setBadge(el, ok, text) {
+      // Nederlands commentaar: Kleine helper om status-badges te kleuren
+      el.textContent = text;
+      el.className = ok
+        ? 'text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-800'
+        : 'text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700';
+    }
+
+    function showError(msg) {
+      // Nederlands commentaar: Toon een duidelijke foutmelding aan de gebruiker
+      const box = $('uploadError');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    function clearError() {
+      $('uploadError').classList.add('hidden');
+      $('uploadError').textContent = '';
+    }
+
+    function parseNumberMaybeEU(value) {
+      // Nederlands commentaar: Macs met EU-instellingen gebruiken soms komma als decimaal.
+      // We accepteren zowel "1234.56" als "1234,56".
+      if (value === null || value === undefined) return NaN;
+      const s = String(value).trim();
+      if (!s) return NaN;
+      const normalized = s.replace(/\s/g, '').replace(',', '.');
+      const n = Number(normalized);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function detectDelimiter(sampleText) {
+      // Nederlands commentaar: Heuristiek om automatisch , of ; te detecteren.
+      // We kijken naar de eerste paar regels en tellen scheidingstekens.
+      const lines = sampleText.split(/\r?\n/).slice(0, 10).join('\n');
+      const commas = (lines.match(/,/g) || []).length;
+      const semis  = (lines.match(/;/g) || []).length;
+      return semis > commas ? ';' : ',';
+    }
+
+    function parseCSVFile(file, onDone) {
+      // Nederlands commentaar: Lees bestand als tekst, detecteer delimiter, parse met PapaParse.
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result || '');
+        const delimiter = detectDelimiter(text);
+
+        Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+          delimiter,
+          dynamicTyping: false,
+          complete: (res) => {
+            onDone({ rows: res.data, delimiter, errors: res.errors });
+          },
+        });
+      };
+      reader.onerror = () => onDone({ rows: null, delimiter: null, errors: [{ message: 'Could not read file.' }] });
+      reader.readAsText(file);
+    }
+
+    function normalizeDateKey(dateStr) {
+      // Nederlands commentaar: Normaliseer dates naar YYYY-MM-DD zodat merge betrouwbaar is.
+      // We ondersteunen: YYYY-MM-DD, YYYY/MM/DD, DD-MM-YYYY, DD/MM/YYYY.
+      const raw = String(dateStr || '').trim();
+      if (!raw) return null;
+
+      // ISO-achtig
+      let m = raw.match(/^\s*(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*$/);
+      if (m) {
+        const y = Number(m[1]);
+        const mo = String(Number(m[2])).padStart(2, '0');
+        const d = String(Number(m[3])).padStart(2, '0');
+        return `${y}-${mo}-${d}`;
+      }
+
+      // Europees
+      m = raw.match(/^\s*(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})\s*$/);
+      if (m) {
+        const d = String(Number(m[1])).padStart(2, '0');
+        const mo = String(Number(m[2])).padStart(2, '0');
+        const y = Number(m[3]);
+        return `${y}-${mo}-${d}`;
+      }
+
+      // Fallback: Date.parse proberen (kan locale-gevoelig zijn)
+      const t = Date.parse(raw);
+      if (!Number.isFinite(t)) return null;
+      const dt = new Date(t);
+      const y = dt.getFullYear();
+      const mo = String(dt.getMonth() + 1).padStart(2, '0');
+      const d = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${mo}-${d}`;
+    }
+
+    function computeBlackFridayDate(year) {
+      // Nederlands commentaar: Black Friday is de dag na de 4e donderdag van november.
+      // We berekenen: 1) vind 1 nov, 2) vind eerste donderdag, 3) tel 3 weken erbij, 4) +1 dag.
+      const nov1 = new Date(Date.UTC(year, 10, 1)); // maand 10 = november
+      const day = nov1.getUTCDay(); // 0=zo ... 4=do
+      const deltaToThu = (4 - day + 7) % 7;
+      const firstThu = new Date(Date.UTC(year, 10, 1 + deltaToThu));
+      const fourthThu = new Date(Date.UTC(year, 10, firstThu.getUTCDate() + 21));
+      const bf = new Date(Date.UTC(year, 10, fourthThu.getUTCDate() + 1));
+      const y = bf.getUTCFullYear();
+      const mo = String(bf.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(bf.getUTCDate()).padStart(2, '0');
+      return `${y}-${mo}-${d}`;
+    }
+
+    function formatCurrencyEUR(n) {
+      // Nederlands commentaar: We tonen EUR als standaard voor EU-klascontext.
+      if (!Number.isFinite(n)) return '—';
+      return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
+    }
+
+    function formatTemp(n) {
+      if (!Number.isFinite(n)) return '—';
+      return `${n.toFixed(1)}°C`;
+    }
+
+    function isValidMergedRow(r) {
+      // Nederlands commentaar: Voor regressie hebben we zowel revenue als temperature nodig.
+      return r && Number.isFinite(r.revenue) && Number.isFinite(r.temperature);
+    }
+
+    // =============================
+    // Nederlands commentaar: Mergen en modelleren
+    // =============================
+
+    function mergeOnDate(salesRows, weatherRows) {
+      // Nederlands commentaar: Merge op date (inner join). We bouwen een map op basis van weather.
+      const wMap = new Map();
+      for (const w of weatherRows) {
+        const key = normalizeDateKey(w.date);
+        if (!key) continue;
+        const temperature = parseNumberMaybeEU(w.temperature);
+        const precipitation = parseNumberMaybeEU(w.precipitation);
+        wMap.set(key, {
+          date: key,
+          temperature: Number.isFinite(temperature) ? temperature : NaN,
+          precipitation: Number.isFinite(precipitation) ? precipitation : NaN,
+        });
+      }
+
+      const merged = [];
+      for (const s of salesRows) {
+        const key = normalizeDateKey(s.date);
+        if (!key) continue;
+        const revenue = parseNumberMaybeEU(s.revenue);
+        const w = wMap.get(key);
+        if (!w) continue;
+        merged.push({
+          date: key,
+          revenue: Number.isFinite(revenue) ? revenue : NaN,
+          temperature: w.temperature,
+          precipitation: w.precipitation,
+        });
+      }
+
+      // Nederlands commentaar: Sorteer chronologisch voor nette grafiek.
+      merged.sort((a, b) => a.date.localeCompare(b.date));
+      return merged;
+    }
+
+    function fitLinearModel(rows) {
+      // Nederlands commentaar: Fit lineaire regressie: y = a + b*x met simple-statistics.
+      // We gebruiken 'linearRegression' op punten [x, y].
+      const pts = rows.filter(isValidMergedRow).map(r => [r.temperature, r.revenue]);
+      if (pts.length < 2) return null;
+
+      const lr = ss.linearRegression(pts); // { m, b } in simple-statistics termen
+      return { a: lr.b, b: lr.m, n: pts.length };
+    }
+
+    function predictRevenue(model, temp) {
+      // Nederlands commentaar: Voorspel omzet op basis van temperatuur.
+      if (!model || !Number.isFinite(temp)) return NaN;
+      return model.a + model.b * temp;
+    }
+
+    function computeAvgBFTempFromHistory(mergedRows, bfDates) {
+      // Nederlands commentaar: Pak de temperatuur op BF-dagen (die in de data aanwezig zijn) en neem het gemiddelde.
+      const temps = bfDates
+        .map(d => mergedRows.find(r => r.date === d))
+        .filter(Boolean)
+        .map(r => r.temperature)
+        .filter(Number.isFinite);
+
+      if (!temps.length) return NaN;
+      return ss.mean(temps);
+    }
+
+    // =============================
+    // Nederlands commentaar: Chart rendering
+    // =============================
+
+    function buildChart(labels, revenueSeries, predictedPoint) {
+      // Nederlands commentaar: Maak of update de Chart.js grafiek.
+      const ctx = $('chart');
+
+      const data = {
+        labels,
+        datasets: [
+          {
+            label: 'Historical revenue',
+            data: revenueSeries,
+            borderWidth: 2,
+            tension: 0.25,
+            pointRadius: 1.5,
+          },
+          {
+            label: 'Predicted Black Friday',
+            data: predictedPoint, // array met mostly null + 1 waarde
+            borderWidth: 0,
+            pointRadius: 6,
+            pointHoverRadius: 7,
+            showLine: false,
+          }
+        ]
+      };
+
+      const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.parsed.y;
+                if (ctx.dataset.label === 'Predicted Black Friday') {
+                  return ` ${ctx.dataset.label}: ${formatCurrencyEUR(v)}`;
+                }
+                return ` ${ctx.dataset.label}: ${formatCurrencyEUR(v)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 8 },
+            grid: { display: false }
+          },
+          y: {
+            ticks: {
+              callback: (v) => {
+                // Nederlands commentaar: korte y-as labels
+                if (!Number.isFinite(v)) return v;
+                return new Intl.NumberFormat('nl-NL', { notation: 'compact' }).format(v);
+              }
+            }
+          }
+        }
+      };
+
+      if (state.chart) {
+        state.chart.data = data;
+        state.chart.options = options;
+        state.chart.update();
+        return;
+      }
+
+      state.chart = new Chart(ctx, { type: 'line', data, options });
+    }
+
+    function updatePredictedPointOnChart(labels, bfDate, bfRevenue) {
+      // Nederlands commentaar: Plaats 1 datapunt op BF-datum in een dataset vol nulls.
+      const idx = labels.indexOf(bfDate);
+      const arr = labels.map(() => null);
+      if (idx >= 0) arr[idx] = bfRevenue;
+      return arr;
+    }
+
+    // =============================
+    // Nederlands commentaar: UI-logica
+    // =============================
+
+    function refreshRunButtonState() {
+      // Nederlands commentaar: Run knop wordt actief zodra beide bestanden geladen zijn.
+      const ok = !!state.salesRows && !!state.weatherRows;
+      $('btnRun').disabled = !ok;
+    }
+
+    function refreshDelimiterInfo() {
+      // Nederlands commentaar: Toon delimiter-informatie. Als ze verschillen, meld dat.
+      const s = state.delimiterSales;
+      const w = state.delimiterWeather;
+      if (!s && !w) {
+        $('delimiterInfo').textContent = '—';
+        return;
+      }
+      if (s && w && s !== w) {
+        $('delimiterInfo').textContent = `sales: "${s}" • weather: "${w}"`;
+      } else {
+        $('delimiterInfo').textContent = `"${s || w}"`;
+      }
+    }
+
+    function runForecast() {
+      // Nederlands commentaar: Dit is de centrale workflow: merge -> fit -> BF datum -> base voorspelling -> chart.
+      clearError();
+
+      state.mergedRows = mergeOnDate(state.salesRows, state.weatherRows);
+      const validForModel = state.mergedRows.filter(isValidMergedRow);
+
+      if (validForModel.length < 10) {
+        showError('Not enough valid merged rows for a stable model. Please check your columns (date, revenue, temperature).');
+        return;
+      }
+
+      state.model = fitLinearModel(state.mergedRows);
+      if (!state.model) {
+        showError('Could not fit a linear regression model. Ensure revenue and temperature are numeric.');
+        return;
+      }
+
+      // Nederlands commentaar: Bepaal BF datum van het aankomende jaar t.o.v. laatste datum in data.
+      // We nemen aan: data bevat laatste 3 jaar; forecast is voor volgende Black Friday na laatste datapunt.
+      const lastDate = state.mergedRows[state.mergedRows.length - 1]?.date;
+      const lastYear = lastDate ? Number(lastDate.slice(0, 4)) : (new Date().getFullYear());
+      const bfCandidates = [lastYear - 2, lastYear - 1, lastYear].map(computeBlackFridayDate);
+      const nextBF = computeBlackFridayDate(lastYear + 1);
+      state.bfDate = nextBF;
+
+      // Nederlands commentaar: Gemiddelde BF temperatuur uit historische BF dagen (als aanwezig).
+      const avgTemp = computeAvgBFTempFromHistory(state.mergedRows, bfCandidates);
+      state.avgTempBF = avgTemp;
+
+      // Nederlands commentaar: Als BF temperatuur niet uit historie kan, gebruik algemene gemiddelde temperatuur.
+      const tempsAll = validForModel.map(r => r.temperature);
+      const fallbackAvg = ss.mean(tempsAll);
+      const baseTemp = Number.isFinite(avgTemp) ? avgTemp : fallbackAvg;
+
+      // Nederlands commentaar: Base voorspelling bij scenario=0.
+      state.predictedBFRevenue = predictRevenue(state.model, baseTemp);
+
+      // Nederlands commentaar: Bouw labels + series en voeg BF datum toe als extra label zodat punt zichtbaar is.
+      const labels = state.mergedRows.map(r => r.date);
+      const revenues = state.mergedRows.map(r => (Number.isFinite(r.revenue) ? r.revenue : null));
+
+      // Voeg BF datum toe als die niet in labels zit
+      if (!labels.includes(state.bfDate)) {
+        labels.push(state.bfDate);
+        revenues.push(null);
+      }
+
+      // Sorteer labels+revenues tegelijk
+      const zipped = labels.map((d, i) => ({ d, y: revenues[i] }));
+      zipped.sort((a, b) => a.d.localeCompare(b.d));
+      const sortedLabels = zipped.map(z => z.d);
+      const sortedRevenues = zipped.map(z => z.y);
+
+      const predictedArr = updatePredictedPointOnChart(sortedLabels, state.bfDate, state.predictedBFRevenue);
+      buildChart(sortedLabels, sortedRevenues, predictedArr);
+
+      // Nederlands commentaar: Update KPI's in de UI
+      $('avgTemp').textContent = formatTemp(baseTemp);
+      $('modelEq').textContent = `a=${state.model.a.toFixed(0)}, b=${state.model.b.toFixed(0)} (n=${state.model.n})`;
+      $('predRevenue').textContent = formatCurrencyEUR(state.predictedBFRevenue);
+      $('bfDateUsed').textContent = state.bfDate;
+
+      // Nederlands commentaar: Activeer slider
+      $('tempSlider').disabled = false;
+      $('tempSlider').value = 0;
+      $('scenarioLabel').textContent = '0';
+      $('scenarioTemp').textContent = formatTemp(baseTemp);
+      $('scenarioRevenue').textContent = formatCurrencyEUR(state.predictedBFRevenue);
+
+      // Nederlands commentaar: Kleine samenvatting voor studenten
+      const mergedCount = state.mergedRows.length;
+      const modelCount = validForModel.length;
+      $('dataSummary').innerHTML = `
+        <div class="rounded-2xl soft-border bg-slate-50 p-3">
+          <div class="font-semibold text-slate-800">Data summary</div>
+          <div class="mt-1">Merged rows: <span class="font-semibold">${mergedCount}</span> • Used for regression: <span class="font-semibold">${modelCount}</span></div>
+          <div class="mt-1">Upcoming Black Friday date (computed): <span class="font-semibold">${state.bfDate}</span></div>
+          <div class="mt-1">Tip: If Black Friday dates are not present in your CSV, we use the overall average temperature as baseline.</div>
+        </div>
+      `;
+    }
+
+    function updateScenario() {
+      // Nederlands commentaar: Slider verandert temperatuur → nieuwe voorspelling → update UI + chart punt.
+      if (!state.model || !state.mergedRows) return;
+
+      const delta = parseFloat($('tempSlider').value);
+      $('scenarioLabel').textContent = String(delta);
+
+      const valid = state.mergedRows.filter(isValidMergedRow);
+      const tempsAll = valid.map(r => r.temperature);
+      const fallbackAvg = ss.mean(tempsAll);
+      const baseTemp = Number.isFinite(state.avgTempBF) ? state.avgTempBF : fallbackAvg;
+
+      const scenTemp = baseTemp + delta;
+      const scenRevenue = predictRevenue(state.model, scenTemp);
+
+      $('scenarioTemp').textContent = formatTemp(scenTemp);
+      $('scenarioRevenue').textContent = formatCurrencyEUR(scenRevenue);
+      $('predRevenue').textContent = formatCurrencyEUR(scenRevenue);
+
+      // Update chart predicted point
+      const labels = state.chart?.data?.labels || [];
+      const predictedArr = updatePredictedPointOnChart(labels, state.bfDate, scenRevenue);
+      state.chart.data.datasets[1].data = predictedArr;
+      state.chart.update();
+    }
+
+    // =============================
+    // Nederlands commentaar: Demo data (single-file, geen extra assets)
+    // =============================
+
+    function generateDemoData() {
+      // Nederlands commentaar: We maken 3 jaar dagelijkse data met seizoenspatroon en BF spikes.
+      const now = new Date();
+      const endYear = now.getFullYear() - 1; // gebruik vorig jaar als laatste historische jaar
+      const startYear = endYear - 2;
+
+      const rowsSales = [];
+      const rowsWeather = [];
+
+      // simpele random helper
+      const randn = () => {
+        // Box-Muller
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+      };
+
+      for (let y = startYear; y <= endYear; y++) {
+        for (let m = 0; m < 12; m++) {
+          const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+          for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(Date.UTC(y, m, d));
+            const yyyy = date.getUTCFullYear();
+            const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(date.getUTCDate()).padStart(2, '0');
+            const key = `${yyyy}-${mm}-${dd}`;
+
+            // temperatuur: seizoensgolf + ruis
+            const dayOfYear = Math.floor((date - new Date(Date.UTC(y, 0, 0))) / 86400000);
+            const seasonal = 10 + 10 * Math.sin((2 * Math.PI * (dayOfYear - 80)) / 365);
+            const temp = seasonal + randn() * 2.0;
+
+            // neerslag: random met lichte winterverhoging
+            const precipBase = (m <= 1 || m >= 10) ? 3 : 2;
+            const precip = Math.max(0, precipBase + randn() * 1.5);
+
+            // omzet: basis + temp-effect + seizoenscomponent + ruis
+            const base = 90000;
+            const tempEffect = 2500 * (temp - 10); // ~ lineaire relatie
+            const seasonRevenue = 15000 * Math.cos((2 * Math.PI * (dayOfYear - 20)) / 365);
+            let revenue = base + tempEffect + seasonRevenue + randn() * 8000;
+
+            // BF spike
+            const bf = computeBlackFridayDate(y);
+            if (key === bf) revenue *= 2.2;
+
+            rowsWeather.push({ date: key, temperature: temp.toFixed(2), precipitation: precip.toFixed(2) });
+            rowsSales.push({ date: key, revenue: Math.max(0, Math.round(revenue)).toString() });
+          }
+        }
+      }
+
+      return { rowsSales, rowsWeather };
+    }
+
+    function loadDemo() {
+      // Nederlands commentaar: Vul state met demo-rows en update UI.
+      clearError();
+      const demo = generateDemoData();
+      state.salesRows = demo.rowsSales;
+      state.weatherRows = demo.rowsWeather;
+      state.delimiterSales = ',';
+      state.delimiterWeather = ',';
+
+      setBadge($('salesStatus'), true, 'Loaded ✓');
+      setBadge($('weatherStatus'), true, 'Loaded ✓');
+      $('salesFilename').textContent = 'demo (generated)';
+      $('weatherFilename').textContent = 'demo (generated)';
+      refreshDelimiterInfo();
+      refreshRunButtonState();
+
+      runForecast();
+    }
+
+    // =============================
+    // Nederlands commentaar: Event listeners
+    // =============================
+
+    $('salesFile').addEventListener('change', (e) => {
+      clearError();
+      const file = e.target.files?.[0];
+      if (!file) return;
+      $('salesFilename').textContent = file.name;
+
+      parseCSVFile(file, ({ rows, delimiter, errors }) => {
+        if (errors && errors.length) {
+          showError(`Sales CSV parse error: ${errors[0].message || 'Unknown error'}`);
+          return;
+        }
+        // Nederlands commentaar: Basic kolomcheck
+        const cols = rows?.[0] ? Object.keys(rows[0]) : [];
+        if (!cols.includes('date') || !cols.includes('revenue')) {
+          showError('Sales CSV must have columns: date, revenue');
+          return;
+        }
+
+        state.salesRows = rows;
+        state.delimiterSales = delimiter;
+        setBadge($('salesStatus'), true, 'Loaded ✓');
+        refreshDelimiterInfo();
+        refreshRunButtonState();
+      });
+    });
+
+    $('weatherFile').addEventListener('change', (e) => {
+      clearError();
+      const file = e.target.files?.[0];
+      if (!file) return;
+      $('weatherFilename').textContent = file.name;
+
+      parseCSVFile(file, ({ rows, delimiter, errors }) => {
+        if (errors && errors.length) {
+          showError(`Weather CSV parse error: ${errors[0].message || 'Unknown error'}`);
+          return;
+        }
+        const cols = rows?.[0] ? Object.keys(rows[0]) : [];
+        if (!cols.includes('date') || !cols.includes('temperature') || !cols.includes('precipitation')) {
+          showError('Weather CSV must have columns: date, temperature, precipitation');
+          return;
+        }
+
+        state.weatherRows = rows;
+        state.delimiterWeather = delimiter;
+        setBadge($('weatherStatus'), true, 'Loaded ✓');
+        refreshDelimiterInfo();
+        refreshRunButtonState();
+      });
+    });
+
+    $('btnRun').addEventListener('click', () => {
+      runForecast();
+    });
+
+    $('tempSlider').addEventListener('input', () => {
+      updateScenario();
+    });
+
+    $('btnLoadDemo').addEventListener('click', () => {
+      loadDemo();
+    });
+
+    $('toggleSidebar').addEventListener('click', () => {
+      // Nederlands commentaar: Simpele collapse voor sidebar uitleg
+      const body = $('sidebarBody');
+      const btn = $('toggleSidebar');
+      const isHidden = body.classList.contains('hidden');
+      if (isHidden) {
+        body.classList.remove('hidden');
+        btn.textContent = 'Collapse';
+      } else {
+        body.classList.add('hidden');
+        btn.textContent = 'Expand';
+      }
+    });
+
+    // Nederlands commentaar: Init lege chart (zodat layout direct klopt)
+    buildChart([], [], []);
+
+  </script>
+</body>
+</html>
