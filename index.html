@@ -55,7 +55,7 @@
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h2 class="text-lg font-semibold">1) Upload your data</h2>
-                <p class="text-sm muted">Required CSVs: <span class="font-medium">sales.csv</span> (date, revenue) and <span class="font-medium">weather.csv</span> (date, temperature, precipitation)</p>
+                <p class="text-sm muted">Daily or monthly CSVs: <span class="font-medium">sales.csv</span> (date, revenue) and <span class="font-medium">weather.csv</span> (date, temperature, precipitation)</p>
               </div>
               <button id="btnLoadDemo" class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition">
                 Load demo data
@@ -68,7 +68,7 @@
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <div class="font-semibold">Sales CSV</div>
-                    <div class="text-xs muted">Columns: date, revenue</div>
+                    <div class="text-xs muted">Columns: date + revenue OR month + revenue</div>
                   </div>
                   <span id="salesStatus" class="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">Not loaded</span>
                 </div>
@@ -86,7 +86,7 @@
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <div class="font-semibold">Weather CSV</div>
-                    <div class="text-xs muted">Columns: date, temperature, precipitation</div>
+                    <div class="text-xs muted">Columns: date + temperature + precipitation OR month + avg_temp_c + precip_index</div>
                   </div>
                   <span id="weatherStatus" class="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">Not loaded</span>
                 </div>
@@ -136,7 +136,7 @@
 
             <div class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
               <div class="rounded-2xl soft-border bg-slate-50 p-4">
-                <div class="text-xs muted">Predicted Black Friday revenue</div>
+                <div id="revenueHeading" class="text-xs muted">Predicted Black Friday revenue</div>
                 <div id="predRevenue" class="text-2xl font-semibold text-blue-700">—</div>
                 <div class="text-xs muted mt-1">Date used: <span id="bfDateUsed" class="font-semibold text-slate-800">—</span></div>
               </div>
@@ -285,7 +285,7 @@
     function detectDelimiter(sampleText) {
       // Nederlands commentaar: Heuristiek om automatisch , of ; te detecteren.
       // We kijken naar de eerste paar regels en tellen scheidingstekens.
-      const lines = sampleText.split(/\r?\n/).slice(0, 10).join('\n');
+      const lines = sampleText.split(/\r?\n/)[0];
       const commas = (lines.match(/,/g) || []).length;
       const semis  = (lines.match(/;/g) || []).length;
       return semis > commas ? ';' : ',';
@@ -300,6 +300,7 @@
 
         Papa.parse(text, {
           header: true,
+          transformHeader: h => h.replace(/^\uFEFF/, "").trim().toLowerCase(),
           skipEmptyLines: true,
           delimiter,
           dynamicTyping: false,
@@ -317,6 +318,7 @@
       // We ondersteunen: YYYY-MM-DD, YYYY/MM/DD, DD-MM-YYYY, DD/MM/YYYY.
       const raw = String(dateStr || '').trim();
       if (!raw) return null;
+      if (/^\d{4}-\d{2}$/.test(raw)) return raw + '-01';
 
       // ISO-achtig
       let m = raw.match(/^\s*(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*$/);
@@ -381,39 +383,42 @@
     // Nederlands commentaar: Mergen en modelleren
     // =============================
 
+    function prepareRows(rows, kind) {
+      if (!rows?.length) throw new Error('The CSV is empty.');
+      const cols = Object.keys(rows[0]);
+      const dc = cols.includes('month') ? 'month' : 'date';
+      const tc = cols.includes('avg_temp_c') ? 'avg_temp_c' : 'temperature';
+      const pc = cols.includes('precip_index') ? 'precip_index' : 'precipitation';
+      const fields = kind === 'sales' ? [['revenue','revenue']] : [['temperature',tc],['precipitation',pc]];
+      if ([dc,...fields.map(f=>f[1])].some(c=>!cols.includes(c))) throw new Error(kind === 'sales' ? 'Sales CSV needs date + revenue OR month + revenue.' : 'Weather CSV needs date + temperature + precipitation OR month + avg_temp_c + precip_index.');
+      return rows.map((r,i)=>{
+        const raw=String(r[dc]||'').trim(), date=normalizeDateKey(raw);
+        const check=date && new Date(date+'T00:00:00Z');
+        if (!date || !Number.isFinite(check.getTime()) || check.toISOString().slice(0,10)!==date) throw new Error(`Invalid date in row ${i+2}.`);
+        const out={date,monthly:dc==='month' || /^\d{4}-\d{2}$/.test(raw)};
+        for (const [key,col] of fields) {
+          out[key]=parseNumberMaybeEU(r[col]);
+          if (!Number.isFinite(out[key])) throw new Error(`Invalid ${col} in row ${i+2}.`);
+        }
+        return out;
+      });
+    }
+
     function mergeOnDate(salesRows, weatherRows) {
-      // Nederlands commentaar: Merge op date (inner join). We bouwen een map op basis van weather.
-      const wMap = new Map();
-      for (const w of weatherRows) {
-        const key = normalizeDateKey(w.date);
-        if (!key) continue;
-        const temperature = parseNumberMaybeEU(w.temperature);
-        const precipitation = parseNumberMaybeEU(w.precipitation);
-        wMap.set(key, {
-          date: key,
-          temperature: Number.isFinite(temperature) ? temperature : NaN,
-          precipitation: Number.isFinite(precipitation) ? precipitation : NaN,
-        });
+      // Nederlands: verkoop optellen, weer middelen; gezamenlijke maand- of dagsleutel.
+      state.monthly=[...salesRows,...weatherRows].some(r=>r.monthly);
+      const keyFor=r=>state.monthly?r.date.slice(0,7)+'-01':r.date;
+      const sales=new Map(),weather=new Map();
+      for (const r of salesRows) { const k=keyFor(r);sales.set(k,(sales.get(k)||0)+Number(r.revenue)); }
+      for (const r of weatherRows) {
+        const k=keyFor(r),v=weather.get(k)||{temperature:0,precipitation:0,n:0};
+        v.temperature+=Number(r.temperature);v.precipitation+=Number(r.precipitation);v.n++;weather.set(k,v);
       }
-
-      const merged = [];
-      for (const s of salesRows) {
-        const key = normalizeDateKey(s.date);
-        if (!key) continue;
-        const revenue = parseNumberMaybeEU(s.revenue);
-        const w = wMap.get(key);
-        if (!w) continue;
-        merged.push({
-          date: key,
-          revenue: Number.isFinite(revenue) ? revenue : NaN,
-          temperature: w.temperature,
-          precipitation: w.precipitation,
-        });
-      }
-
-      // Nederlands commentaar: Sorteer chronologisch voor nette grafiek.
-      merged.sort((a, b) => a.date.localeCompare(b.date));
-      return merged;
+      state.unmatchedSales=[...sales.keys()].filter(k=>!weather.has(k)).length;
+      state.unmatchedWeather=[...weather.keys()].filter(k=>!sales.has(k)).length;
+      return [...sales].filter(([k])=>weather.has(k)).map(([date,revenue])=>{
+        const w=weather.get(date);return {date,revenue,temperature:w.temperature/w.n,precipitation:w.precipitation/w.n};
+      }).sort((a,b)=>a.date.localeCompare(b.date));
     }
 
     function fitLinearModel(rows) {
@@ -422,6 +427,7 @@
       const pts = rows.filter(isValidMergedRow).map(r => [r.temperature, r.revenue]);
       if (pts.length < 2) return null;
 
+      if (new Set(pts.map(p => p[0])).size < 2) return null;
       const lr = ss.linearRegression(pts); // { m, b } in simple-statistics termen
       return { a: lr.b, b: lr.m, n: pts.length };
     }
@@ -553,6 +559,7 @@
     function runForecast() {
       // Nederlands commentaar: Dit is de centrale workflow: merge -> fit -> BF datum -> base voorspelling -> chart.
       clearError();
+      if (!state.salesRows || !state.weatherRows) {showError('Upload both CSV files first.');return;}
 
       state.mergedRows = mergeOnDate(state.salesRows, state.weatherRows);
       const validForModel = state.mergedRows.filter(isValidMergedRow);
@@ -573,11 +580,13 @@
       const lastDate = state.mergedRows[state.mergedRows.length - 1]?.date;
       const lastYear = lastDate ? Number(lastDate.slice(0, 4)) : (new Date().getFullYear());
       const bfCandidates = [lastYear - 2, lastYear - 1, lastYear].map(computeBlackFridayDate);
-      const nextBF = computeBlackFridayDate(lastYear + 1);
+      const thisBF = computeBlackFridayDate(lastYear);
+      const nextBF = thisBF > lastDate ? thisBF : computeBlackFridayDate(lastYear + 1);
       state.bfDate = nextBF;
 
       // Nederlands commentaar: Gemiddelde BF temperatuur uit historische BF dagen (als aanwezig).
-      const avgTemp = computeAvgBFTempFromHistory(state.mergedRows, bfCandidates);
+      const november = state.mergedRows.filter(r => r.date.slice(5, 7) === '11');
+      const avgTemp = state.monthly && november.length ? ss.mean(november.map(r => r.temperature)) : computeAvgBFTempFromHistory(state.mergedRows, bfCandidates);
       state.avgTempBF = avgTemp;
 
       // Nederlands commentaar: Als BF temperatuur niet uit historie kan, gebruik algemene gemiddelde temperatuur.
@@ -607,6 +616,10 @@
       const predictedArr = updatePredictedPointOnChart(sortedLabels, state.bfDate, state.predictedBFRevenue);
       buildChart(sortedLabels, sortedRevenues, predictedArr);
 
+      state.chart.data.datasets[0].label = state.monthly ? 'Historical monthly revenue' : 'Historical daily revenue';
+      state.chart.data.datasets[1].label = state.monthly ? 'November scenario (monthly)' : 'Predicted Black Friday';
+      state.chart.update();
+      $('revenueHeading').textContent = state.monthly ? 'November revenue scenario' : 'Predicted Black Friday revenue';
       // Nederlands commentaar: Update KPI's in de UI
       $('avgTemp').textContent = formatTemp(baseTemp);
       $('modelEq').textContent = `a=${state.model.a.toFixed(0)}, b=${state.model.b.toFixed(0)} (n=${state.model.n})`;
@@ -628,7 +641,8 @@
           <div class="font-semibold text-slate-800">Data summary</div>
           <div class="mt-1">Merged rows: <span class="font-semibold">${mergedCount}</span> • Used for regression: <span class="font-semibold">${modelCount}</span></div>
           <div class="mt-1">Upcoming Black Friday date (computed): <span class="font-semibold">${state.bfDate}</span></div>
-          <div class="mt-1">Tip: If Black Friday dates are not present in your CSV, we use the overall average temperature as baseline.</div>
+          <div class="mt-1">${state.monthly ? 'Monthly sales are summed before joining to weather. Baseline: historical November temperature (overall mean if unavailable). Amounts are monthly estimates for Black Friday planning, not measured daily sales.' : 'Daily sales are summed by date. Baseline: historical Black Friday temperature, or the overall mean if unavailable.'}</div>
+          <div class="mt-1">Unmatched periods — sales: ${state.unmatchedSales}; weather: ${state.unmatchedWeather}. Precipitation is not used by this temperature-only model.</div>
         </div>
       `;
     }
@@ -742,56 +756,31 @@
     // Nederlands commentaar: Event listeners
     // =============================
 
-    $('salesFile').addEventListener('change', (e) => {
-      clearError();
-      const file = e.target.files?.[0];
-      if (!file) return;
-      $('salesFilename').textContent = file.name;
-
-      parseCSVFile(file, ({ rows, delimiter, errors }) => {
-        if (errors && errors.length) {
-          showError(`Sales CSV parse error: ${errors[0].message || 'Unknown error'}`);
-          return;
-        }
-        // Nederlands commentaar: Basic kolomcheck
-        const cols = rows?.[0] ? Object.keys(rows[0]) : [];
-        if (!cols.includes('date') || !cols.includes('revenue')) {
-          showError('Sales CSV must have columns: date, revenue');
-          return;
-        }
-
-        state.salesRows = rows;
-        state.delimiterSales = delimiter;
-        setBadge($('salesStatus'), true, 'Loaded ✓');
-        refreshDelimiterInfo();
-        refreshRunButtonState();
+    function invalidateForecast() {
+      state.model=null;state.mergedRows=null;
+      $('tempSlider').disabled=true;
+      for (const id of ['avgTemp','modelEq','predRevenue','bfDateUsed','scenarioTemp','scenarioRevenue']) $(id).textContent='—';
+      $('dataSummary').textContent='';
+      buildChart([],[],[]);
+    }
+    for (const kind of ['sales','weather']) {
+      $(kind+'File').addEventListener('change',e=>{
+        clearError(); invalidateForecast(); state[kind+'Rows']=null;
+        setBadge($(kind+'Status'),false,'Not loaded');refreshRunButtonState();
+        const file=e.target.files?.[0];if(!file)return;
+        $(kind+'Filename').textContent=file.name;
+        if (!/\.csv$/i.test(file.name)) {showError('Please use a CSV file, not an Excel workbook.');return;}
+        parseCSVFile(file,({rows,delimiter,errors})=>{
+          try {
+            if(errors?.length)throw new Error(errors[0].message);
+            state[kind+'Rows']=prepareRows(rows,kind);
+            state[kind==='sales'?'delimiterSales':'delimiterWeather']=delimiter;
+            setBadge($(kind+'Status'),true,`Loaded ✓ (${rows.length} rows)`);
+          } catch(err) {state[kind+'Rows']=null;showError(err.message);}
+          refreshDelimiterInfo();refreshRunButtonState();
+        });
       });
-    });
-
-    $('weatherFile').addEventListener('change', (e) => {
-      clearError();
-      const file = e.target.files?.[0];
-      if (!file) return;
-      $('weatherFilename').textContent = file.name;
-
-      parseCSVFile(file, ({ rows, delimiter, errors }) => {
-        if (errors && errors.length) {
-          showError(`Weather CSV parse error: ${errors[0].message || 'Unknown error'}`);
-          return;
-        }
-        const cols = rows?.[0] ? Object.keys(rows[0]) : [];
-        if (!cols.includes('date') || !cols.includes('temperature') || !cols.includes('precipitation')) {
-          showError('Weather CSV must have columns: date, temperature, precipitation');
-          return;
-        }
-
-        state.weatherRows = rows;
-        state.delimiterWeather = delimiter;
-        setBadge($('weatherStatus'), true, 'Loaded ✓');
-        refreshDelimiterInfo();
-        refreshRunButtonState();
-      });
-    });
+    }
 
     $('btnRun').addEventListener('click', () => {
       runForecast();
